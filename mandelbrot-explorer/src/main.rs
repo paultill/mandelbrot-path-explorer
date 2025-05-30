@@ -147,8 +147,11 @@ fn render_mandelbrot(width: usize, height: usize, center: (f64, f64), scale: f64
             let color = if iter == max_iter {
                 egui::Color32::BLACK
             } else {
-                let c = (255.0 * iter as f32 / max_iter as f32) as u8;
-                egui::Color32::from_rgb(c, 0, 255 - c)
+                // Map t to hue (0..360) for a rainbow spectrum
+                let t = 1.0 - (iter as f32 / max_iter as f32);
+                let hue = t * 360.0;
+                let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
+                egui::Color32::from_rgb(r, g, b)
             };
             pixels.push(color);
         }
@@ -189,6 +192,25 @@ fn mandelbrot_path(px: usize, py: usize, width: usize, height: usize, center: (f
         zx = tmp;
     }
     path
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+    let (r1, g1, b1) = match h as u32 {
+        0..=59 => (c, x, 0.0),
+        60..=119 => (x, c, 0.0),
+        120..=179 => (0.0, c, x),
+        180..=239 => (0.0, x, c),
+        240..=299 => (x, 0.0, c),
+        300..=359 => (c, 0.0, x),
+        _ => (0.0, 0.0, 0.0),
+    };
+    let r = ((r1 + m) * 255.0).round() as u8;
+    let g = ((g1 + m) * 255.0).round() as u8;
+    let b = ((b1 + m) * 255.0).round() as u8;
+    (r, g, b)
 }
 
 fn main() -> eframe::Result<()> {
