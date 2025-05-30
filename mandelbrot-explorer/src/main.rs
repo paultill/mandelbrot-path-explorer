@@ -3,6 +3,8 @@ use eframe::{egui, App, CreationContext};
 struct MandelbrotApp {
     mandelbrot_texture: egui::TextureHandle,
     last_size: [usize; 2],
+    last_click: Option<(usize, usize)>,
+    last_path: Vec<(f64, f64)>,
 }
 
 impl MandelbrotApp {
@@ -17,6 +19,8 @@ impl MandelbrotApp {
         Self {
             mandelbrot_texture,
             last_size: size,
+            last_click: None,
+            last_path: Vec::new(),
         }
     }
 }
@@ -26,15 +30,56 @@ impl App for MandelbrotApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Mandelbrot Explorer");
             let available = ui.available_size();
-            let width = available.x.max(100.0) as usize;
-            let height = available.y.max(100.0) as usize;
-            let size = [width, height];
+            let side = available.x.min(available.y).max(100.0).round() as usize;
+            let size = [side, side];
             if size != self.last_size {
-                let image = render_mandelbrot(width, height);
+                let image = render_mandelbrot(side, side);
                 self.mandelbrot_texture.set(image, egui::TextureOptions::default());
                 self.last_size = size;
             }
-            ui.image(&self.mandelbrot_texture);
+            let image_size = egui::Vec2::new(side as f32, side as f32);
+            let offset_x = (available.x - image_size.x) / 2.0;
+            let offset_y = (available.y - image_size.y) / 2.0;
+            ui.add_space(offset_y.max(0.0));
+            ui.horizontal_centered(|ui| {
+                ui.add_space(offset_x.max(0.0));
+                let image_response = ui.image(&self.mandelbrot_texture)
+                    .interact(egui::Sense::click_and_drag());
+                // Handle click or drag
+                let pointer_pos = if image_response.dragged() || image_response.clicked() {
+                    image_response.interact_pointer_pos()
+                } else {
+                    None
+                };
+                if let Some(pos) = pointer_pos {
+                    let px = (pos.x - offset_x.max(0.0)).clamp(0.0, side as f32 - 1.0) as usize;
+                    let py = (pos.y - offset_y.max(0.0)).clamp(0.0, side as f32 - 1.0) as usize;
+                    let path = mandelbrot_path(px, py, side, side);
+                    self.last_click = Some((px, py));
+                    self.last_path = path;
+                }
+                // Draw the path if available
+                if !self.last_path.is_empty() {
+                    let painter = ui.painter();
+                    let scale = 3.0 / side as f64;
+                    let to_screen = |zx: f64, zy: f64| -> egui::Pos2 {
+                        let x = ((zx + 2.0) / scale) as f32;
+                        let y = ((zy + 1.5) / scale) as f32;
+                        egui::pos2(
+                            image_response.rect.left() + x,
+                            image_response.rect.top() + y,
+                        )
+                    };
+                    for w in self.last_path.windows(2) {
+                        let p0 = to_screen(w[0].0, w[0].1);
+                        let p1 = to_screen(w[1].0, w[1].1);
+                        painter.line_segment([
+                            p0,
+                            p1,
+                        ], egui::Stroke::new(2.0, egui::Color32::YELLOW));
+                    }
+                }
+            });
         });
     }
 }
@@ -42,12 +87,12 @@ impl App for MandelbrotApp {
 fn render_mandelbrot(width: usize, height: usize) -> egui::ColorImage {
     let mut pixels = Vec::with_capacity(width * height);
     let max_iter = 100;
-    let scale_x = 3.5 / width as f64;
-    let scale_y = 2.0 / height as f64;
+    // For 1:1 aspect ratio, use a square region in the complex plane
+    let scale = 3.0 / width as f64; // covers -2.0..1.0 horizontally, -1.5..1.5 vertically
     for y in 0..height {
         for x in 0..width {
-            let cx = x as f64 * scale_x - 2.5;
-            let cy = y as f64 * scale_y - 1.0;
+            let cx = x as f64 * scale - 2.0;
+            let cy = y as f64 * scale - 1.5;
             let mut zx = 0.0;
             let mut zy = 0.0;
             let mut iter = 0;
@@ -70,6 +115,26 @@ fn render_mandelbrot(width: usize, height: usize) -> egui::ColorImage {
         size: [width, height],
         pixels,
     }
+}
+
+fn mandelbrot_path(px: usize, py: usize, width: usize, height: usize) -> Vec<(f64, f64)> {
+    let mut path = Vec::new();
+    let scale = 3.0 / width as f64;
+    let cx = px as f64 * scale - 2.0;
+    let cy = py as f64 * scale - 1.5;
+    let mut zx = 0.0;
+    let mut zy = 0.0;
+    let max_iter = 100;
+    for _ in 0..max_iter {
+        path.push((zx, zy));
+        if zx * zx + zy * zy >= 4.0 {
+            break;
+        }
+        let tmp = zx * zx - zy * zy + cx;
+        zy = 2.0 * zx * zy + cy;
+        zx = tmp;
+    }
+    path
 }
 
 fn main() -> eframe::Result<()> {
